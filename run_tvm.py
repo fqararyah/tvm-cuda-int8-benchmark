@@ -1,3 +1,4 @@
+from common import get_network
 import numpy as np
 import tvm
 import tvm.autotvm as autotvm
@@ -5,7 +6,6 @@ import tvm.relay as relay
 import tvm.relay.testing
 import tvm.autotvm
 from tvm.contrib import graph_runtime
-from common import get_network
 import sys
 import argparse
 
@@ -43,10 +43,10 @@ def bench(name, batch):
 
 def main():
     with tvm.target.cuda():
-        with autotvm.apply_history_best(args.log_file):
-            for batch in [1, 16]:
-                for name in ['vgg-19', 'resnet-50', 'resnext-50', 'inception_v3', 'drn-c-26', 'dcn-resnet-101']:
-                    bench(name, batch)
+        #with autotvm.apply_history_best(args.log_file):
+        #for batch in [1, 16]:
+        for name in ['vgg-19', 'resnet-50', 'resnext-50', 'inception_v3', 'drn-c-26', 'dcn-resnet-101']:
+            bench(name, batch=1)
 
 
 if __name__ == '__main__':
