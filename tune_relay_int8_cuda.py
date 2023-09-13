@@ -72,7 +72,7 @@ import tvm.relay.testing
 from tvm.autotvm.tuner import XGBTuner, GATuner, RandomTuner, GridSearchTuner
 import tvm.contrib.graph_executor as runtime
 
-import keras
+import tensorflow.keras.applications as models
 import tensorflow as tf
 from tvm.contrib.download import download_testdata
 
@@ -83,42 +83,34 @@ from tvm.contrib.download import download_testdata
 # We can load some pre-defined network from :code:`tvm.relay.testing`.
 # We can also load models from MXNet, ONNX and TensorFlow.
 
-network = "mobilenet"
+MODEL_NAME = "mob_v1"
 
-def get_network_keras(name, batch_size):
+def get_network_keras(batch_size):
     """Get the symbol definition and random weight of a network"""
     input_shape = (batch_size, 3, 224, 224)
     output_shape = (batch_size, 1000)
 
     shape_dict = {"input_1": input_shape}
 
-    if tuple(keras.__version__.split(".")) < ("2", "4", "0"):
-        weights_url = "".join(
-            [
-                "https://github.com/fchollet/deep-learning-models/releases/",
-                "download/v0.2/resnet50_weights_tf_dim_ordering_tf_kernels.h5",
-            ]
-        )
-        weights_file = "resnet50_keras_old.h5"
-    else:
-        weights_url = "".join(
-            [
-                " https://storage.googleapis.com/tensorflow/keras-applications/",
-                "resnet/resnet50_weights_tf_dim_ordering_tf_kernels.h5",
-            ]
-        )
-        weights_file = "resnet50_keras_new.h5"
+    if MODEL_NAME == 'resnet_50':
+        model = model = models.ResNet50()
+    elif MODEL_NAME == 'mob_v1':
+        model = models.MobileNet()
+    elif MODEL_NAME == 'mob_v1_0_5':
+        model = models.MobileNet(alpha=0.5)
+    elif MODEL_NAME == 'mob_v2':
+        model = models.MobileNetV2()
+    elif MODEL_NAME == 'mob_v2_0_5':
+        model = models.MobileNetV2(alpha=0.5)
+    elif MODEL_NAME == 'mob_v2_0_75':
+        model = models.MobileNetV2(alpha=0.75)
+    elif MODEL_NAME == 'mob_v2_0_25':
+        model = models.MobileNetV2(alpha=0.35)
 
-
-    weights_path = download_testdata(weights_url, weights_file, module="keras")
-    keras_resnet50 = tf.keras.applications.resnet50.ResNet50(
-        include_top=True, weights=None, input_shape=(224, 224, 3), classes=1000
-    )
-    keras_resnet50.load_weights(weights_path)
-
-    mod, params = relay.frontend.from_keras(keras_resnet50, shape_dict)
+    mod, params = relay.frontend.from_keras(model, shape_dict)
 
     return mod, params, input_shape, output_shape
+
 
 def get_network(name, batch_size):
     """Get the symbol definition and random weight of a network"""
@@ -174,7 +166,7 @@ def get_network(name, batch_size):
 target = tvm.target.cuda()
 
 #### TUNING OPTION ####
-log_file = "%s.log" % network
+log_file = "%s.log" % MODEL_NAME
 dtype = "float32"
 
 tuning_option = {
@@ -296,16 +288,16 @@ def tune_tasks(
 def tune_and_evaluate(tuning_opt):
     # extract workloads from relay program
     print("Extract tasks...")
-    mod, params, input_shape, out_shape = get_network_keras(network, batch_size=1)
-    #fareed
+    mod, params, input_shape, out_shape = get_network_keras(batch_size=1)
+    # fareed
     with relay.quantize.qconfig(store_lowbit_output=False):
         mod = relay.quantize.quantize(mod, params=params)
-    #end fareed
+    # end fareed
     tasks = autotvm.task.extract_from_program(
         mod["main"], target=target, params=params, ops=(
             relay.op.get("nn.conv2d"),)
     )
-    #fareed
+    # fareed
     # use int8 template_key
     for i in range(len(tasks)):
         tsk = tasks[i]
@@ -317,10 +309,10 @@ def tune_and_evaluate(tuning_opt):
             tsk = autotvm.task.create(tasks[i].name, tasks[i].args,
                                       tasks[i].target, tasks[i].target_host)
             tasks[i] = tsk
-        #end fareed
-    #///////////////////tuning///////////////////
+        # end fareed
+    # ///////////////////tuning///////////////////
     # run tuning tasks
-    #print("Tuning...")
+    # print("Tuning...")
     tune_tasks(tasks, **tuning_opt)
 
     # compile kernels with history best records
@@ -336,10 +328,11 @@ def tune_and_evaluate(tuning_opt):
             (np.random.uniform(size=input_shape)).astype(dtype))
         module.set_input("data", data_tvm)
 
-        lib.export_library('./builds/' + network + '.so')
+        lib.export_library('./builds/' + MODEL_NAME + '.so')
         # evaluate
         print("Evaluate inference time cost...")
         print(module.benchmark(dev, number=1, repeat=600))
+
 
 tune_and_evaluate(tuning_option)
 
