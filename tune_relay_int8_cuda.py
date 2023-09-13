@@ -83,7 +83,7 @@ from tvm.contrib.download import download_testdata
 # We can load some pre-defined network from :code:`tvm.relay.testing`.
 # We can also load models from MXNet, ONNX and TensorFlow.
 
-MODEL_NAME = "mob_v1"
+MODEL_NAME = "mob_v2"
 
 def get_network_keras(batch_size):
     """Get the symbol definition and random weight of a network"""
@@ -326,7 +326,7 @@ def tune_and_evaluate(tuning_opt):
         module = runtime.GraphModule(lib["default"](dev))
         data_tvm = tvm.nd.array(
             (np.random.uniform(size=input_shape)).astype(dtype))
-        module.set_input("data", data_tvm)
+        module.set_input("input_1", data_tvm)
 
         lib.export_library('./builds/' + MODEL_NAME + '.so')
         # evaluate
