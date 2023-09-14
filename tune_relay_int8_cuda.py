@@ -166,14 +166,15 @@ def get_network(name, batch_size):
 target = tvm.target.cuda()
 
 #### TUNING OPTION ####
-log_file = "%s.log" % MODEL_NAME
+n_trial = 20
+log_file = "./builds/%s.log" % MODEL_NAME + '_' + str(n_trial)
 dtype = "float32"
 
 tuning_option = {
     "log_filename": log_file,
     "tuner": "xgb_knob",
-    "n_trial": 10,
-    "early_stopping": 5,
+    "n_trial": n_trial,
+    "early_stopping": int(n_trial / 2),
     "measure_option": autotvm.measure_option(
         builder=autotvm.LocalBuilder(timeout=10),
         runner=autotvm.LocalRunner(
@@ -328,128 +329,10 @@ def tune_and_evaluate(tuning_opt):
             (np.random.uniform(size=input_shape)).astype(dtype))
         module.set_input("input_1", data_tvm)
 
-        lib.export_library('./builds/' + MODEL_NAME + '.so')
+        lib.export_library('./builds/' + MODEL_NAME + '_' + str(tuning_option['n_trial']) + '.so')
         # evaluate
         print("Evaluate inference time cost...")
         print(module.benchmark(dev, number=1, repeat=600))
 
 
 tune_and_evaluate(tuning_option)
-
-
-# We do not run the tuning in our webpage server since it takes too long.
-# Uncomment the following line to run it by yourself.
-
-# tune_and_evaluate(tuning_option)
-
-######################################################################
-# Sample Output
-# -------------
-# The tuning needs to compile many programs and extract feature from them.
-# So a high performance CPU is recommended. One sample output is listed below.
-# It takes about 4 hours to get the following output on a 32T AMD Ryzen Threadripper.
-# The tuning target is NVIDIA 1080 Ti.
-# (You can see some errors during compilation. If the tuning is not stuck, it is okay.)
-#
-# .. code-block:: bash
-#
-#    Extract tasks...
-#    Tuning...
-#    [Task  1/12]  Current/Best:  541.83/3570.66 GFLOPS | Progress: (960/2000) | 1001.31 s Done.
-#    [Task  2/12]  Current/Best:    0.56/ 803.33 GFLOPS | Progress: (704/2000) | 608.08 s Done.
-#    [Task  3/12]  Current/Best:  103.69/1141.25 GFLOPS | Progress: (768/2000) | 702.13 s Done.
-#    [Task  4/12]  Current/Best: 2905.03/3925.15 GFLOPS | Progress: (864/2000) | 745.94 sterminate called without an active exception
-#    [Task  4/12]  Current/Best: 2789.36/3925.15 GFLOPS | Progress: (1056/2000) | 929.40 s Done.
-#    [Task  5/12]  Current/Best:   89.06/1076.24 GFLOPS | Progress: (704/2000) | 601.73 s Done.
-#    [Task  6/12]  Current/Best:   40.39/2129.02 GFLOPS | Progress: (1088/2000) | 1125.76 s Done.
-#    [Task  7/12]  Current/Best: 4090.53/5007.02 GFLOPS | Progress: (800/2000) | 903.90 s Done.
-#    [Task  8/12]  Current/Best:    4.78/1272.28 GFLOPS | Progress: (768/2000) | 749.14 s Done.
-#    [Task  9/12]  Current/Best: 1391.45/2325.08 GFLOPS | Progress: (992/2000) | 1084.87 s Done.
-#    [Task 10/12]  Current/Best: 1995.44/2383.59 GFLOPS | Progress: (864/2000) | 862.60 s Done.
-#    [Task 11/12]  Current/Best: 4093.94/4899.80 GFLOPS | Progress: (224/2000) | 240.92 sterminate called without an active exception
-#    [Task 11/12]  Current/Best: 3487.98/4909.91 GFLOPS | Progress: (480/2000) | 534.96 sterminate called without an active exception
-#    [Task 11/12]  Current/Best: 4636.84/4912.17 GFLOPS | Progress: (1184/2000) | 1381.16 sterminate called without an active exception
-#    [Task 11/12]  Current/Best:   50.12/4912.17 GFLOPS | Progress: (1344/2000) | 1602.81 s Done.
-#    [Task 12/12]  Current/Best: 3581.31/4286.30 GFLOPS | Progress: (736/2000) | 943.52 s Done.
-#    Compile...
-#    Evaluate inference time cost...
-#    Mean inference time (std dev): 1.07 ms (0.05 ms)
-#
-# As a reference baseline, the time cost of MXNet + TensorRT on resnet-18 is 1.30ms. So we are a little faster.
-
-######################################################################
-#
-# .. note:: **Experiencing Difficulties?**
-#
-#   The auto tuning module is error-prone. If you always see " 0.00/ 0.00 GFLOPS",
-#   then there must be something wrong.
-#
-#   First, make sure you set the correct configuration of your device.
-#   Then, you can print debug information by adding these lines in the beginning
-#   of the script. It will print every measurement result, where you can find useful
-#   error messages.
-#
-#   .. code-block:: python
-#
-#      import logging
-#      logging.getLogger('autotvm').setLevel(logging.DEBUG)
-#
-#   Finally, always feel free to ask our community for help on https://discuss.tvm.apache.org
-
-#################################################################
-# .. _tutorials-autotvm-scale-up-rpc-tracker:
-
-#################################################################
-# Scale up measurement by using multiple devices
-# ----------------------------------------------
-# If you have multiple devices, you can use all of them for measurement.
-# TVM uses the RPC Tracker to manage distributed devices.
-# The RPC Tracker is a centralized controller node. We can register all devices to
-# the tracker. For example, if we have 10 GPU cards, we can register all of them
-# to the tracker, and run 10 measurements in parallel, accelerating the tuning process.
-#
-# To start an RPC tracker, run this command on the host machine. The tracker is
-# required during the whole tuning process, so we need to open a new terminal for
-# this command:
-#
-# .. code-block:: bash
-#
-#   python -m tvm.exec.rpc_tracker --host=0.0.0.0 --port=9190
-#
-# The expected output is
-#
-# .. code-block:: bash
-#
-#   INFO:RPCTracker:bind to 0.0.0.0:9190
-#
-# Then open another new terminal for the RPC server. We need to start one dedicated server
-# for each device. We use a string key to distinguish the types of devices.
-# You can pick a name you like.
-# (Note: For rocm backend, there are some internal errors with the compiler,
-# we need to add `--no-fork` to the argument list.)
-#
-# .. code-block:: bash
-#
-#     python -m tvm.exec.rpc_server --tracker=127.0.0.1:9190 --key=1080ti
-#
-# After registering devices, we can confirm it by querying rpc_tracker
-#
-# .. code-block:: bash
-#
-#   python -m tvm.exec.query_rpc_tracker --host=127.0.0.1 --port=9190
-#
-# For example, if we have four 1080ti, two titanx and one gfx900, the output can be
-#
-# .. code-block:: bash
-#
-#    Queue Status
-#    ----------------------------------
-#    key          total  free  pending
-#    ----------------------------------
-#    1080ti       4      4     0
-#    titanx       2      2     0
-#    gfx900       1      1     0
-#    ----------------------------------
-#
-# Finally, we need to change the tuning option to use RPCRunner. Use the code below
-# to replace the corresponding part above.
