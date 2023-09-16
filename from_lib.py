@@ -5,15 +5,18 @@ import tvm
 import tvm.contrib.graph_executor as runtime
 import numpy as np
 import time
+import tvm.runtime.profiler_vm as profiler_vm
 
-MODEL_NAME = 'mob_v2'
+from tvm.contrib.debugger.debug_executor import GraphModuleDebug
+
+MODEL_NAME = 'xce_r'
 n_iters = 50
 path_lib = './builds/' + MODEL_NAME + '_' + str(n_iters) + '.so'
 
 # load it back
 loaded_lib = tvm.runtime.load_module(path_lib)
 print(loaded_lib.type_key)
-print(loaded_lib.imported_modules[0].type_key)
+print( type(loaded_lib.imported_modules[0]))
 
 target = tvm.target.cuda()
 
@@ -31,5 +34,4 @@ t1 = time.time()
 module.run()
 t2 = time.time()
 
-for i in range(1000):
-    print((t2-t1) * 1000)
+print(module.benchmark(dev, number=1, repeat=1000))

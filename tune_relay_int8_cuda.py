@@ -75,6 +75,12 @@ import tvm.contrib.graph_executor as runtime
 import tensorflow.keras.applications as models
 import tensorflow as tf
 from tvm.contrib.download import download_testdata
+import tvm.runtime.profiler_vm as profiler_vm
+
+from prox_g.proxyless_nas import proxyless_net
+import torch
+import io
+import onnx
 
 #################################################################
 # Define Network
@@ -83,9 +89,29 @@ from tvm.contrib.download import download_testdata
 # We can load some pre-defined network from :code:`tvm.relay.testing`.
 # We can also load models from MXNet, ONNX and TensorFlow.
 
-MODEL_NAME = "mob_v2"
+MODEL_NAME = "gprox_3"
+MODEL_PATH = '/media/SSD2TB/fareed/wd/my_repos/DL_Benchmarking/tflite_scripts_imgnt_accuracy_and_weight_extraction/gprox_3_32_inout'
+n_trial = 10
 
-def get_network_keras(batch_size):
+def from_torch(module, dummy_inputs):
+    if isinstance(dummy_inputs, torch.Tensor):
+        dummy_inputs = (dummy_inputs,)
+    input_shape = {}
+    for index, dummy_input in enumerate(dummy_inputs):
+        if isinstance(dummy_input, np.ndarray):
+            dummy_input = torch.from_numpy(dummy_input)
+        input_shape['input.1'] = dummy_input.shape
+
+    buffer = io.BytesIO()
+    module.eval()
+    torch.onnx.export(module, dummy_inputs, buffer)
+    buffer.seek(0, 0)
+    onnx_model = onnx.load_model(buffer)
+    # for _input in onnx_model.graph.input:
+    #     print(_input)
+    return tvm.relay.frontend.from_onnx(onnx_model, shape=input_shape)
+
+def get_network_keras_or_torch(batch_size):
     """Get the symbol definition and random weight of a network"""
     input_shape = (batch_size, 3, 224, 224)
     output_shape = (batch_size, 1000)
@@ -106,8 +132,16 @@ def get_network_keras(batch_size):
         model = models.MobileNetV2(alpha=0.75)
     elif MODEL_NAME == 'mob_v2_0_25':
         model = models.MobileNetV2(alpha=0.35)
+    elif MODEL_NAME == 'xce_r':
+        model = models.Xception(input_shape=(224, 224, 3), weights=None)
+    elif MODEL_NAME in ['gprox_3']:
+        model = proxyless_net(2)
 
-    mod, params = relay.frontend.from_keras(model, shape_dict)
+    if MODEL_NAME in ['gprox_3']:
+        torch_input = torch.rand(1, 3, 224, 224)
+        mod, params = from_torch(model, torch_input)
+    else:
+        mod, params = relay.frontend.from_keras(model, shape_dict)
 
     return mod, params, input_shape, output_shape
 
@@ -166,9 +200,8 @@ def get_network(name, batch_size):
 target = tvm.target.cuda()
 
 #### TUNING OPTION ####
-n_trial = 20
 log_file = "./builds/%s.log" % MODEL_NAME + '_' + str(n_trial)
-dtype = "float32"
+dtype = "float32"  # input before being quantized
 
 tuning_option = {
     "log_filename": log_file,
@@ -289,7 +322,7 @@ def tune_tasks(
 def tune_and_evaluate(tuning_opt):
     # extract workloads from relay program
     print("Extract tasks...")
-    mod, params, input_shape, out_shape = get_network_keras(batch_size=1)
+    mod, params, input_shape, out_shape = get_network_keras_or_torch(batch_size=1)
     # fareed
     with relay.quantize.qconfig(store_lowbit_output=False):
         mod = relay.quantize.quantize(mod, params=params)
@@ -313,26 +346,35 @@ def tune_and_evaluate(tuning_opt):
         # end fareed
     # ///////////////////tuning///////////////////
     # run tuning tasks
-    # print("Tuning...")
-    tune_tasks(tasks, **tuning_opt)
 
+    print("Tuning...")
+    tune_tasks(tasks, **tuning_opt)
     # compile kernels with history best records
     with autotvm.apply_history_best(log_file):
         print("Compile...")
         with tvm.transform.PassContext(opt_level=3):
             lib = relay.build_module.build(mod, target=target, params=params)
 
-        # load parameters
         dev = tvm.device(str(target), 0)
         module = runtime.GraphModule(lib["default"](dev))
         data_tvm = tvm.nd.array(
             (np.random.uniform(size=input_shape)).astype(dtype))
         module.set_input("input_1", data_tvm)
 
-        lib.export_library('./builds/' + MODEL_NAME + '_' + str(tuning_option['n_trial']) + '.so')
+        lib.export_library('./builds/' + MODEL_NAME + '_' +
+                        str(tuning_option['n_trial']) + '.so')
+
         # evaluate
+        # 3
+        # exe = relay.vm.compile(mod, target, params=params)
+        # vm = profiler_vm.VirtualMachineProfiler(exe, dev)
+        # report = vm.profile([data_tvm], func_name="main", number=1000, repeat=3)
+
+        # with open('./logs/' + MODEL_NAME + '_' + str(n_trial) + '_profs.txt', 'w') as f:
+        #     f.write(str(report))
+        # 3
         print("Evaluate inference time cost...")
-        print(module.benchmark(dev, number=1, repeat=600))
+        print(module.benchmark(dev, number=1, repeat=1000))
 
 
 tune_and_evaluate(tuning_option)
