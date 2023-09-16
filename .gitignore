@@ -1,3 +1,9 @@
 *.pyc
 *.onnx
 TensorRT/bench
+*.so
+*.tmp
+*.log*
+**logs/*
+*.out
+*.params
