@@ -91,7 +91,7 @@ import onnx
 # We can load some pre-defined network from :code:`tvm.relay.testing`.
 # We can also load models from MXNet, ONNX and TensorFlow.
 
-MODEL_NAME = "gprox_3"
+MODEL_NAME = "mob_v2"
 n_trial = 2
 tuning_algo = "xgb_knob"
 
@@ -106,7 +106,8 @@ if len(sys.argv) > 3:
 target = tvm.target.cuda()
 
 #### TUNING OPTION ####
-log_file = "./logs/%s.log" % MODEL_NAME + '_' + tuning_algo + '_' + str(n_trial)
+log_file = "./logs/%s.log" % MODEL_NAME + \
+    '_' + tuning_algo + '_' + str(n_trial)
 dtype = "float32"  # input just for the first layer before being quantized
 
 tuning_option = {
@@ -120,6 +121,7 @@ tuning_option = {
             number=4, repeat=3, timeout=4, min_repeat_ms=150),
     ),
 }
+
 
 def from_torch(module, dummy_inputs):
     if isinstance(dummy_inputs, torch.Tensor):
@@ -138,6 +140,7 @@ def from_torch(module, dummy_inputs):
     # for _input in onnx_model.graph.input:
     #     print(_input)
     return tvm.relay.frontend.from_onnx(onnx_model, shape=input_shape)
+
 
 def get_network_keras_or_torch(batch_size):
     """Get the symbol definition and random weight of a network"""
@@ -296,7 +299,7 @@ def tune_tasks(
         elif tuner == "ga":
             tuner_obj = GATuner(tsk, pop_size=100)
         elif tuner == "random":
-            #print("rrrrrrrrrrrrrrrrrrrrr")
+            # print("rrrrrrrrrrrrrrrrrrrrr")
             tuner_obj = RandomTuner(tsk)
         elif tuner == "gridsearch":
             tuner_obj = GridSearchTuner(tsk)
@@ -332,36 +335,35 @@ def tune_tasks(
 def tune_and_evaluate(tuning_opt):
     # extract workloads from relay program
     print("Extract tasks...")
-    mod, params, input_shape, out_shape = get_network_keras_or_torch(batch_size=1)
-    # fareed
-    with relay.quantize.qconfig(store_lowbit_output=False):
-        mod = relay.quantize.quantize(mod, params=params)
-    # end fareed
+    mod, params, input_shape, out_shape = get_network_keras_or_torch(
+        batch_size=1)
     tasks = autotvm.task.extract_from_program(
         mod["main"], target=target, params=params, ops=(
             relay.op.get("nn.conv2d"),)
     )
-    # fareed
-    # use int8 template_key
-    for i in range(len(tasks)):
-        tsk = tasks[i]
-        if tsk.workload[0] != 'conv2d':
-            continue
-        input_channel = tsk.workload[2][1]
-        output_channel = tsk.workload[2][0]
-        if output_channel % 4 == 0 and input_channel % 4 == 0:
-            tsk = autotvm.task.create(tasks[i].name, tasks[i].args,
-                                      tasks[i].target, tasks[i].target_host)
-            tasks[i] = tsk
-        # end fareed
-    # ///////////////////tuning///////////////////
-    # run tuning tasks
 
-    print("Tuning...")
-    tune_tasks(tasks, **tuning_opt)
-    # compile kernels with history best records
-    with autotvm.apply_history_best(log_file):
-        print("Compile...")
+    if tuning_option['n_trial'] > 0:
+        print("Tuning...")
+        tune_tasks(tasks, **tuning_opt)
+
+        # compile kernels with history best records
+        with autotvm.apply_history_best(log_file):
+            print("Compile...")
+            with tvm.transform.PassContext(opt_level=3):
+                lib = relay.build_module.build(mod, target=target, params=params)
+            # load parameters
+            dev = tvm.device(str(target), 0)
+            module = runtime.GraphModule(lib["default"](dev))
+            data_tvm = tvm.nd.array(
+                (np.random.uniform(size=input_shape)).astype(dtype))
+            if MODEL_NAME in ['gprox_3']:
+                module.set_input("input.1", data_tvm)
+            else:
+                module.set_input("input_1", data_tvm)
+
+            lib.export_library('./builds_fp32/' + MODEL_NAME + '_' + tuning_algo + '_fp32_' +
+                               str(tuning_option['n_trial']) + '.so')
+    else:
         with tvm.transform.PassContext(opt_level=3):
             lib = relay.build_module.build(mod, target=target, params=params)
 
@@ -374,8 +376,10 @@ def tune_and_evaluate(tuning_opt):
         else:
             module.set_input("input_1", data_tvm)
 
-        lib.export_library('./builds/' + MODEL_NAME + '_' + tuning_algo + '_' + 
-                        str(tuning_option['n_trial']) + '.so')
+        lib.export_library('./builds/' + MODEL_NAME + '_' + tuning_algo + '_fp32_' +
+                           str(tuning_option['n_trial']) + '.so')
+        print("Evaluate inference time cost...")
+        print(module.benchmark(dev, number=1, repeat=1000))
 
         # evaluate
         # 3

@@ -22,7 +22,7 @@ if len(sys.argv) > 2:
 if len(sys.argv) > 3:
     tuning_algo = sys.argv[3]
 
-path_lib = './builds/' + MODEL_NAME + '_' + tuning_algo + '_' + str(n_trial) +'.so'
+path_lib = './builds_fp32/' + MODEL_NAME + '_' + tuning_algo + '_fp32_' + str(n_trial) +'.so'
 originally_from_onnx_models = ['gprox_3']
 
 def is_originally_from_onnx_model(model_name):
@@ -53,4 +53,4 @@ else:
         (np.random.uniform(size=input_shape)).astype(dtype))
     module.set_input("input_1", data_tvm)
 
-print(module.benchmark(dev, number=1, repeat=2000))
+print(module.benchmark(dev, number=1, repeat=20))

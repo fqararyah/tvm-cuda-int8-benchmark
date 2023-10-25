@@ -39,6 +39,7 @@ https://keras.io/#installation
 # sphinx_gallery_requires_cuda = True
 # sphinx_gallery_end_ignore
 from tensorflow.keras.applications.resnet50 import preprocess_input
+import tensorflow.keras.applications as models
 from matplotlib import pyplot as plt
 from PIL import Image
 import tvm
@@ -53,6 +54,8 @@ import numpy as np
 # Load pretrained keras model
 # ----------------------------
 # We load a pretrained resnet-50 classification model provided by keras.
+
+MODEL_NAME = "mob_v2"
 
 if tuple(keras.__version__.split(".")) < ("2", "4", "0"):
     weights_url = "".join(
@@ -93,12 +96,41 @@ data = np.array(img)[np.newaxis, :].astype("float32")
 data = preprocess_input(data).transpose([0, 3, 1, 2])
 print("input_1", data.shape)
 
+def get_network_keras_or_torch(batch_size):
+    """Get the symbol definition and random weight of a network"""
+    input_shape = (batch_size, 3, 224, 224)
+    output_shape = (batch_size, 1000)
+
+    shape_dict = {"input_1": input_shape}
+
+    if MODEL_NAME == 'resnet_50':
+        model = model = models.ResNet50()
+    elif MODEL_NAME == 'mob_v1':
+        model = models.MobileNet()
+    elif MODEL_NAME == 'mob_v1_0_5':
+        model = models.MobileNet(alpha=0.5)
+    elif MODEL_NAME == 'mob_v2':
+        model = models.MobileNetV2()
+    elif MODEL_NAME == 'mob_v2_0_5':
+        model = models.MobileNetV2(alpha=0.5)
+    elif MODEL_NAME == 'mob_v2_0_75':
+        model = models.MobileNetV2(alpha=0.75)
+    elif MODEL_NAME == 'mob_v2_0_25':
+        model = models.MobileNetV2(alpha=0.35)
+    elif MODEL_NAME == 'xce_r':
+        model = models.Xception(input_shape=(224, 224, 3), weights=None)
+
+    mod, params = relay.frontend.from_keras(model, shape_dict)
+    
+    return mod, params, input_shape, output_shape
+    
 ######################################################################
 # Compile the model with Relay
 # ----------------------------
 # convert the keras model(NHWC layout) to Relay format(NCHW layout).
 shape_dict = {"input_1": data.shape}
-mod, params = relay.frontend.from_keras(keras_resnet50, shape_dict)
+#mod, params = relay.frontend.from_keras(keras_resnet50, shape_dict)
+mod, params, input_shape, out_shape = get_network_keras_or_torch(batch_size=1)
 # compile the model
 target = "cuda"
 dev = tvm.cuda(0)

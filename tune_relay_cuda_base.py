@@ -62,8 +62,6 @@ __name__ == "__main__":` block.
 # sphinx_gallery_start_ignore
 # sphinx_gallery_requires_cuda = True
 # sphinx_gallery_end_ignore
-import sys
-
 import os
 
 import numpy as np
@@ -74,104 +72,12 @@ import tvm.relay.testing
 from tvm.autotvm.tuner import XGBTuner, GATuner, RandomTuner, GridSearchTuner
 import tvm.contrib.graph_executor as runtime
 
-import tensorflow.keras.applications as models
-import tensorflow as tf
-from tvm.contrib.download import download_testdata
-import tvm.runtime.profiler_vm as profiler_vm
-
-from prox_g.proxyless_nas import proxyless_net
-import torch
-import io
-import onnx
-
 #################################################################
 # Define Network
 # --------------
 # First we need to define the network in relay frontend API.
 # We can load some pre-defined network from :code:`tvm.relay.testing`.
 # We can also load models from MXNet, ONNX and TensorFlow.
-
-MODEL_NAME = "gprox_3"
-n_trial = 2
-tuning_algo = "xgb_knob"
-
-if len(sys.argv) > 1:
-    MODEL_NAME = sys.argv[1]
-if len(sys.argv) > 2:
-    n_trial = int(sys.argv[2])
-if len(sys.argv) > 3:
-    tuning_algo = sys.argv[3]
-
-#### DEVICE CONFIG ####
-target = tvm.target.cuda()
-
-#### TUNING OPTION ####
-log_file = "./logs/%s.log" % MODEL_NAME + '_' + tuning_algo + '_' + str(n_trial)
-dtype = "float32"  # input just for the first layer before being quantized
-
-tuning_option = {
-    "log_filename": log_file,
-    "tuner": tuning_algo,
-    "n_trial": n_trial,
-    "early_stopping": int(n_trial/2) - 1,
-    "measure_option": autotvm.measure_option(
-        builder=autotvm.LocalBuilder(timeout=10),
-        runner=autotvm.LocalRunner(
-            number=4, repeat=3, timeout=4, min_repeat_ms=150),
-    ),
-}
-
-def from_torch(module, dummy_inputs):
-    if isinstance(dummy_inputs, torch.Tensor):
-        dummy_inputs = (dummy_inputs,)
-    input_shape = {}
-    for index, dummy_input in enumerate(dummy_inputs):
-        if isinstance(dummy_input, np.ndarray):
-            dummy_input = torch.from_numpy(dummy_input)
-        input_shape['input.1'] = dummy_input.shape
-
-    buffer = io.BytesIO()
-    module.eval()
-    torch.onnx.export(module, dummy_inputs, buffer)
-    buffer.seek(0, 0)
-    onnx_model = onnx.load_model(buffer)
-    # for _input in onnx_model.graph.input:
-    #     print(_input)
-    return tvm.relay.frontend.from_onnx(onnx_model, shape=input_shape)
-
-def get_network_keras_or_torch(batch_size):
-    """Get the symbol definition and random weight of a network"""
-    input_shape = (batch_size, 3, 224, 224)
-    output_shape = (batch_size, 1000)
-
-    shape_dict = {"input_1": input_shape}
-
-    if MODEL_NAME == 'resnet_50':
-        model = model = models.ResNet50()
-    elif MODEL_NAME == 'mob_v1':
-        model = models.MobileNet()
-    elif MODEL_NAME == 'mob_v1_0_5':
-        model = models.MobileNet(alpha=0.5)
-    elif MODEL_NAME == 'mob_v2':
-        model = models.MobileNetV2()
-    elif MODEL_NAME == 'mob_v2_0_5':
-        model = models.MobileNetV2(alpha=0.5)
-    elif MODEL_NAME == 'mob_v2_0_75':
-        model = models.MobileNetV2(alpha=0.75)
-    elif MODEL_NAME == 'mob_v2_0_25':
-        model = models.MobileNetV2(alpha=0.35)
-    elif MODEL_NAME == 'xce_r':
-        model = models.Xception(input_shape=(224, 224, 3), weights=None)
-    elif MODEL_NAME in ['gprox_3']:
-        model = proxyless_net(2)
-
-    if MODEL_NAME in ['gprox_3']:
-        torch_input = torch.rand(1, 3, 224, 224)
-        mod, params = from_torch(model, torch_input)
-    else:
-        mod, params = relay.frontend.from_keras(model, shape_dict)
-
-    return mod, params, input_shape, output_shape
 
 
 def get_network(name, batch_size):
@@ -224,6 +130,26 @@ def get_network(name, batch_size):
 # ------------------
 # Before tuning, we apply some configurations.
 
+#### DEVICE CONFIG ####
+target = tvm.target.cuda()
+
+#### TUNING OPTION ####
+network = "resnet-18"
+log_file = "%s.log" % network
+dtype = "float32"
+
+tuning_option = {
+    "log_filename": log_file,
+    "tuner": "xgb",
+    "n_trial": 2000,
+    "early_stopping": 600,
+    "measure_option": autotvm.measure_option(
+        builder=autotvm.LocalBuilder(timeout=10),
+        runner=autotvm.LocalRunner(
+            number=20, repeat=3, timeout=4, min_repeat_ms=150),
+    ),
+}
+
 ####################################################################
 #
 # .. note:: How to set tuning options
@@ -252,7 +178,7 @@ def tune_tasks(
     tasks,
     measure_option,
     tuner="xgb",
-    n_trial=100,
+    n_trial=1000,
     early_stopping=None,
     log_filename="tuning.log",
     use_transfer_learning=True,
@@ -296,7 +222,6 @@ def tune_tasks(
         elif tuner == "ga":
             tuner_obj = GATuner(tsk, pop_size=100)
         elif tuner == "random":
-            #print("rrrrrrrrrrrrrrrrrrrrr")
             tuner_obj = RandomTuner(tsk)
         elif tuner == "gridsearch":
             tuner_obj = GridSearchTuner(tsk)
@@ -332,62 +257,166 @@ def tune_tasks(
 def tune_and_evaluate(tuning_opt):
     # extract workloads from relay program
     print("Extract tasks...")
-    mod, params, input_shape, out_shape = get_network_keras_or_torch(batch_size=1)
-    # fareed
-    with relay.quantize.qconfig(store_lowbit_output=False):
-        mod = relay.quantize.quantize(mod, params=params)
-    # end fareed
+    mod, params, input_shape, out_shape = get_network(network, batch_size=1)
     tasks = autotvm.task.extract_from_program(
         mod["main"], target=target, params=params, ops=(
             relay.op.get("nn.conv2d"),)
     )
-    # fareed
-    # use int8 template_key
-    for i in range(len(tasks)):
-        tsk = tasks[i]
-        if tsk.workload[0] != 'conv2d':
-            continue
-        input_channel = tsk.workload[2][1]
-        output_channel = tsk.workload[2][0]
-        if output_channel % 4 == 0 and input_channel % 4 == 0:
-            tsk = autotvm.task.create(tasks[i].name, tasks[i].args,
-                                      tasks[i].target, tasks[i].target_host)
-            tasks[i] = tsk
-        # end fareed
-    # ///////////////////tuning///////////////////
-    # run tuning tasks
 
+    # run tuning tasks
     print("Tuning...")
     tune_tasks(tasks, **tuning_opt)
+
     # compile kernels with history best records
     with autotvm.apply_history_best(log_file):
         print("Compile...")
         with tvm.transform.PassContext(opt_level=3):
             lib = relay.build_module.build(mod, target=target, params=params)
 
+        # load parameters
         dev = tvm.device(str(target), 0)
         module = runtime.GraphModule(lib["default"](dev))
         data_tvm = tvm.nd.array(
             (np.random.uniform(size=input_shape)).astype(dtype))
-        if MODEL_NAME in ['gprox_3']:
-            module.set_input("input.1", data_tvm)
-        else:
-            module.set_input("input_1", data_tvm)
-
-        lib.export_library('./builds/' + MODEL_NAME + '_' + tuning_algo + '_' + 
-                        str(tuning_option['n_trial']) + '.so')
+        module.set_input("data", data_tvm)
 
         # evaluate
-        # 3
-        # exe = relay.vm.compile(mod, target, params=params)
-        # vm = profiler_vm.VirtualMachineProfiler(exe, dev)
-        # report = vm.profile([data_tvm], func_name="main", number=1000, repeat=3)
-
-        # with open('./logs/' + MODEL_NAME + '_' + str(n_trial) + '_profs.txt', 'w') as f:
-        #     f.write(str(report))
-        # 3
-        # print("Evaluate inference time cost...")
-        # print(module.benchmark(dev, number=1, repeat=1000))
+        print("Evaluate inference time cost...")
+        print(module.benchmark(dev, number=1, repeat=600))
 
 
-tune_and_evaluate(tuning_option)
+# We do not run the tuning in our webpage server since it takes too long.
+# Uncomment the following line to run it by yourself.
+
+# tune_and_evaluate(tuning_option)
+
+######################################################################
+# Sample Output
+# -------------
+# The tuning needs to compile many programs and extract feature from them.
+# So a high performance CPU is recommended. One sample output is listed below.
+# It takes about 4 hours to get the following output on a 32T AMD Ryzen Threadripper.
+# The tuning target is NVIDIA 1080 Ti.
+# (You can see some errors during compilation. If the tuning is not stuck, it is okay.)
+#
+# .. code-block:: bash
+#
+#    Extract tasks...
+#    Tuning...
+#    [Task  1/12]  Current/Best:  541.83/3570.66 GFLOPS | Progress: (960/2000) | 1001.31 s Done.
+#    [Task  2/12]  Current/Best:    0.56/ 803.33 GFLOPS | Progress: (704/2000) | 608.08 s Done.
+#    [Task  3/12]  Current/Best:  103.69/1141.25 GFLOPS | Progress: (768/2000) | 702.13 s Done.
+#    [Task  4/12]  Current/Best: 2905.03/3925.15 GFLOPS | Progress: (864/2000) | 745.94 sterminate called without an active exception
+#    [Task  4/12]  Current/Best: 2789.36/3925.15 GFLOPS | Progress: (1056/2000) | 929.40 s Done.
+#    [Task  5/12]  Current/Best:   89.06/1076.24 GFLOPS | Progress: (704/2000) | 601.73 s Done.
+#    [Task  6/12]  Current/Best:   40.39/2129.02 GFLOPS | Progress: (1088/2000) | 1125.76 s Done.
+#    [Task  7/12]  Current/Best: 4090.53/5007.02 GFLOPS | Progress: (800/2000) | 903.90 s Done.
+#    [Task  8/12]  Current/Best:    4.78/1272.28 GFLOPS | Progress: (768/2000) | 749.14 s Done.
+#    [Task  9/12]  Current/Best: 1391.45/2325.08 GFLOPS | Progress: (992/2000) | 1084.87 s Done.
+#    [Task 10/12]  Current/Best: 1995.44/2383.59 GFLOPS | Progress: (864/2000) | 862.60 s Done.
+#    [Task 11/12]  Current/Best: 4093.94/4899.80 GFLOPS | Progress: (224/2000) | 240.92 sterminate called without an active exception
+#    [Task 11/12]  Current/Best: 3487.98/4909.91 GFLOPS | Progress: (480/2000) | 534.96 sterminate called without an active exception
+#    [Task 11/12]  Current/Best: 4636.84/4912.17 GFLOPS | Progress: (1184/2000) | 1381.16 sterminate called without an active exception
+#    [Task 11/12]  Current/Best:   50.12/4912.17 GFLOPS | Progress: (1344/2000) | 1602.81 s Done.
+#    [Task 12/12]  Current/Best: 3581.31/4286.30 GFLOPS | Progress: (736/2000) | 943.52 s Done.
+#    Compile...
+#    Evaluate inference time cost...
+#    Mean inference time (std dev): 1.07 ms (0.05 ms)
+#
+# As a reference baseline, the time cost of MXNet + TensorRT on resnet-18 is 1.30ms. So we are a little faster.
+
+######################################################################
+#
+# .. note:: **Experiencing Difficulties?**
+#
+#   The auto tuning module is error-prone. If you always see " 0.00/ 0.00 GFLOPS",
+#   then there must be something wrong.
+#
+#   First, make sure you set the correct configuration of your device.
+#   Then, you can print debug information by adding these lines in the beginning
+#   of the script. It will print every measurement result, where you can find useful
+#   error messages.
+#
+#   .. code-block:: python
+#
+#      import logging
+#      logging.getLogger('autotvm').setLevel(logging.DEBUG)
+#
+#   Finally, always feel free to ask our community for help on https://discuss.tvm.apache.org
+
+#################################################################
+# .. _tutorials-autotvm-scale-up-rpc-tracker:
+
+#################################################################
+# Scale up measurement by using multiple devices
+# ----------------------------------------------
+# If you have multiple devices, you can use all of them for measurement.
+# TVM uses the RPC Tracker to manage distributed devices.
+# The RPC Tracker is a centralized controller node. We can register all devices to
+# the tracker. For example, if we have 10 GPU cards, we can register all of them
+# to the tracker, and run 10 measurements in parallel, accelerating the tuning process.
+#
+# To start an RPC tracker, run this command on the host machine. The tracker is
+# required during the whole tuning process, so we need to open a new terminal for
+# this command:
+#
+# .. code-block:: bash
+#
+#   python -m tvm.exec.rpc_tracker --host=0.0.0.0 --port=9190
+#
+# The expected output is
+#
+# .. code-block:: bash
+#
+#   INFO:RPCTracker:bind to 0.0.0.0:9190
+#
+# Then open another new terminal for the RPC server. We need to start one dedicated server
+# for each device. We use a string key to distinguish the types of devices.
+# You can pick a name you like.
+# (Note: For rocm backend, there are some internal errors with the compiler,
+# we need to add `--no-fork` to the argument list.)
+#
+# .. code-block:: bash
+#
+#     python -m tvm.exec.rpc_server --tracker=127.0.0.1:9190 --key=1080ti
+#
+# After registering devices, we can confirm it by querying rpc_tracker
+#
+# .. code-block:: bash
+#
+#   python -m tvm.exec.query_rpc_tracker --host=127.0.0.1 --port=9190
+#
+# For example, if we have four 1080ti, two titanx and one gfx900, the output can be
+#
+# .. code-block:: bash
+#
+#    Queue Status
+#    ----------------------------------
+#    key          total  free  pending
+#    ----------------------------------
+#    1080ti       4      4     0
+#    titanx       2      2     0
+#    gfx900       1      1     0
+#    ----------------------------------
+#
+# Finally, we need to change the tuning option to use RPCRunner. Use the code below
+# to replace the corresponding part above.
+
+tuning_option = {
+    "log_filename": log_file,
+    "tuner": "xgb",
+    "n_trial": 2000,
+    "early_stopping": 600,
+    "measure_option": autotvm.measure_option(
+        builder=autotvm.LocalBuilder(timeout=10),
+        runner=autotvm.RPCRunner(
+            "1080ti",  # change the device key to your key
+            "127.0.0.1",
+            9190,
+            number=20,
+            repeat=3,
+            timeout=4,
+            min_repeat_ms=150,
+        ),
+    ),
+}
