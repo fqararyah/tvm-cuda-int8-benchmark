@@ -1,0 +1,72 @@
+mob_v2 20 xgb_knob
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   2.3085       2.3077       2.3181       2.2999       0.0049                  
+mob_v2 20 random
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   2.4029       2.4021       2.4092       2.3988       0.0031                  
+mob_v2 20 ga
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   2.3345       2.3350       2.3434       2.3265       0.0042                  
+mob_v1 20 xgb_knob
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   3.9849       3.9853       3.9972       3.9679       0.0067                  
+mob_v1 20 random
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   3.2868       3.2876       3.3201       3.2593       0.0141                  
+mob_v1 20 ga
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   3.2720       3.2738       3.2873       3.2466       0.0103                  
+xce_r 20 xgb_knob
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+  22.9724      21.6855      27.4629      21.3768       2.3289                  
+xce_r 20 random
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+  18.3494      17.9902      20.7647      16.1913       2.0638                  
+xce_r 20 ga
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+  22.9220      22.5834      25.8806      20.3029       2.4623                  
+gprox_3 20 xgb_knob
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   3.8429       3.8339       3.9998       3.8272       0.0363                  
+gprox_3 20 random
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   2.6553       2.6531       2.6685       2.6448       0.0064                  
+gprox_3 20 ga
+GraphExecutorFactory
+<class 'tvm.runtime.module.Module'>
+Execution time summary:
+ mean (ms)   median (ms)    max (ms)     min (ms)     std (ms)  
+   2.6485       2.6492       2.6710       2.6283       0.0117                  
